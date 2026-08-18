@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>PR & Jira Tracker</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="header">
+    <div class="tabs">
+      <button class="tab active" data-tab="github">GitHub PRs</button>
+      <button class="tab" data-tab="jira">Jira Tickets</button>
+    </div>
+    <div class="header-actions">
+      <button class="btn-icon" id="refresh-btn" title="Refresh">↻</button>
+      <button class="btn-icon" id="settings-btn" title="Settings">⚙</button>
+    </div>
+  </div>
+
+  <div class="toolbar">
+    <span id="last-updated"></span>
+  </div>
+
+  <div class="tab-content" id="github-pane">
+    <div class="loading">Loading PRs…</div>
+    <div class="error" style="display:none"></div>
+    <div class="empty" style="display:none"></div>
+    <div class="pr-list"></div>
+  </div>
+
+  <div class="tab-content" id="jira-pane" style="display:none">
+    <div class="loading">Loading tickets…</div>
+    <div class="error" style="display:none"></div>
+    <div class="empty" style="display:none"></div>
+    <div class="ticket-list"></div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

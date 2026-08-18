@@ -1,0 +1,16 @@
+{
+  "manifest_version": 3,
+  "name": "PR & Jira Tracker",
+  "version": "1.0.0",
+  "description": "Track GitHub PRs and Jira tickets across configured repos and projects",
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "PR & Jira Tracker"
+  },
+  "options_page": "options.html",
+  "permissions": ["storage"],
+  "host_permissions": [
+    "https://api.github.com/*",
+    "https://*.atlassian.net/*"
+  ]
+}
