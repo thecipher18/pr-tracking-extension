@@ -6,6 +6,9 @@ let settings = {};
 let currentTab = 'github';
 let allPRs = [];
 let allTickets = [];
+let prCursors = {}; // { "owner/repo": endCursor } for repos with more pages
+
+const STALE_MS = 30 * 60 * 1000;
 
 // ── Bootstrap ──────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', async () => {
@@ -58,7 +61,7 @@ async function loadGitHub() {
   if (cached) {
     renderPRs(pane, cached.data);
     stampUpdated(cached.time);
-    fetchGitHub(pane, true); // background refresh, no spinner
+    if (Date.now() - cached.time > STALE_MS) fetchGitHub(pane, true);
   } else {
     showLoading(pane);
     await fetchGitHub(pane, false);
@@ -75,7 +78,8 @@ async function fetchGitHub(pane, silent) {
     return;
   }
   try {
-    const prs = await fetchAllPRs(settings.repos, settings.githubToken);
+    const { prs, nextCursors } = await fetchAllPRs(settings.repos, settings.githubToken);
+    prCursors = nextCursors;
     await sessionSet('gh_prs', prs);
     stampUpdated(Date.now());
     renderPRs(pane, prs);
@@ -84,26 +88,52 @@ async function fetchGitHub(pane, silent) {
   }
 }
 
-async function fetchAllPRs(repos, token) {
+async function loadMorePRs() {
+  const btn = document.getElementById('gh-load-more').querySelector('button');
+  btn.disabled = true;
+  btn.textContent = 'Loading…';
+  try {
+    const repos = Object.keys(prCursors);
+    const { prs: next, nextCursors } = await fetchAllPRs(repos, settings.githubToken, prCursors);
+    prCursors = nextCursors;
+    allPRs = [...allPRs, ...next].sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
+    await sessionSet('gh_prs', allPRs);
+    renderPRs(document.getElementById('github-pane'), allPRs);
+  } catch (e) {
+    btn.disabled = false;
+    btn.textContent = 'Load more';
+  }
+}
+
+async function fetchAllPRs(repos, token, cursors = {}) {
   const results = await Promise.allSettled(
     repos.map(repo => {
       const [owner, name] = repo.split('/');
-      return fetchRepoPRs(owner, name, token);
+      return fetchRepoPRs(owner, name, token, cursors[repo] ?? null);
     })
   );
   const prs = [];
+  const nextCursors = {};
   results.forEach((r, i) => {
-    if (r.status === 'fulfilled') prs.push(...r.value);
-    else console.warn(`fetchRepoPRs(${repos[i]}):`, r.reason.message);
+    if (r.status === 'fulfilled') {
+      prs.push(...r.value.nodes.map(pr => ({ ...pr, repo: repos[i] })));
+      if (r.value.pageInfo.hasNextPage) nextCursors[repos[i]] = r.value.pageInfo.endCursor;
+    } else {
+      console.warn(`fetchRepoPRs(${repos[i]}):`, r.reason.message);
+    }
   });
-  return prs.sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
+  return {
+    prs: prs.sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt)),
+    nextCursors,
+  };
 }
 
-async function fetchRepoPRs(owner, name, token) {
+async function fetchRepoPRs(owner, name, token, cursor) {
   const query = `
-    query($owner: String!, $name: String!) {
+    query($owner: String!, $name: String!, $cursor: String) {
       repository(owner: $owner, name: $name) {
-        pullRequests(states: [OPEN], first: 30, orderBy: {field: UPDATED_AT, direction: DESC}) {
+        pullRequests(states: [OPEN], first: 100, after: $cursor, orderBy: {field: UPDATED_AT, direction: DESC}) {
+          pageInfo { hasNextPage endCursor }
           nodes {
             number title url isDraft headRefName
             reviewDecision createdAt updatedAt
@@ -118,13 +148,13 @@ async function fetchRepoPRs(owner, name, token) {
   const res = await fetch(GITHUB_GRAPHQL, {
     method: 'POST',
     headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ query, variables: { owner, name } }),
+    body: JSON.stringify({ query, variables: { owner, name, cursor } }),
   });
   if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
   const data = await res.json();
   if (data.errors) throw new Error(data.errors[0].message);
-  return (data.data?.repository?.pullRequests?.nodes ?? [])
-    .map(pr => ({ ...pr, repo: `${owner}/${name}` }));
+  const pr = data.data?.repository?.pullRequests;
+  return { nodes: pr?.nodes ?? [], pageInfo: pr?.pageInfo ?? { hasNextPage: false } };
 }
 
 function prStatus(pr) {
@@ -142,6 +172,13 @@ function renderPRs(pane, prs) {
   populateSelect(document.getElementById('gh-status-filter'),
     new Set(prs.map(prStatus)), 'All statuses');
   document.getElementById('github-filter').style.display = prs.length ? '' : 'none';
+  const loadMore = document.getElementById('gh-load-more');
+  if (Object.keys(prCursors).length) {
+    loadMore.innerHTML = '<button class="load-more-btn">Load more</button>';
+    loadMore.querySelector('button').addEventListener('click', loadMorePRs);
+  } else {
+    loadMore.innerHTML = '';
+  }
   applyPRFilter();
 }
 
@@ -219,7 +256,7 @@ async function loadJira() {
   if (cached) {
     renderTickets(pane, cached.data);
     stampUpdated(cached.time);
-    fetchJira(pane, true); // background refresh
+    if (Date.now() - cached.time > STALE_MS) fetchJira(pane, true);
   } else {
     showLoading(pane);
     await fetchJira(pane, false);

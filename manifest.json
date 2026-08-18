@@ -4,11 +4,16 @@
   "version": "1.0.0",
   "description": "Track GitHub PRs and Jira tickets across configured repos and projects",
   "action": {
-    "default_popup": "popup.html",
     "default_title": "PR & Jira Tracker"
   },
+  "side_panel": {
+    "default_path": "popup.html"
+  },
   "options_page": "options.html",
-  "permissions": ["storage"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "permissions": ["storage", "alarms", "sidePanel"],
   "host_permissions": [
     "https://api.github.com/*",
     "https://*.atlassian.net/*"
