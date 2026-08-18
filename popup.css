@@ -114,6 +114,40 @@ body {
   overflow-x: hidden;
 }
 
+/* ── Filter bar ───────────────────────────────────── */
+.filter-bar {
+  display: flex;
+  gap: 8px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-card);
+}
+
+.filter-bar input[type="search"],
+.filter-bar select {
+  padding: 4px 8px;
+  font-size: 12px;
+  font-family: inherit;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  outline: none;
+}
+.filter-bar input[type="search"] {
+  flex: 2;
+  min-width: 0;
+}
+.filter-bar select {
+  flex: 1;
+  min-width: 0;
+  cursor: pointer;
+}
+.filter-bar input[type="search"]:focus,
+.filter-bar select:focus {
+  border-color: var(--accent);
+}
+
 /* ── Cards ────────────────────────────────────────── */
 .card {
   padding: 9px 12px;

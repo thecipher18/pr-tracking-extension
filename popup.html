@@ -22,6 +22,12 @@
   </div>
 
   <div class="tab-content" id="github-pane">
+    <div class="filter-bar" id="github-filter" style="display:none">
+      <input type="search" id="gh-search" placeholder="Search PRs…">
+      <select id="author-filter"><option value="">All authors</option></select>
+      <select id="gh-assignee-filter"><option value="">All assignees</option></select>
+      <select id="gh-status-filter"><option value="">All statuses</option></select>
+    </div>
     <div class="loading">Loading PRs…</div>
     <div class="error" style="display:none"></div>
     <div class="empty" style="display:none"></div>
@@ -29,6 +35,11 @@
   </div>
 
   <div class="tab-content" id="jira-pane" style="display:none">
+    <div class="filter-bar" id="jira-filter" style="display:none">
+      <input type="search" id="jira-search" placeholder="Search tickets…">
+      <select id="assignee-filter"><option value="">All assignees</option></select>
+      <select id="jira-status-filter"><option value="">All statuses</option></select>
+    </div>
     <div class="loading">Loading tickets…</div>
     <div class="error" style="display:none"></div>
     <div class="empty" style="display:none"></div>

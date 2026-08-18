@@ -4,8 +4,8 @@ const GITHUB_GRAPHQL = 'https://api.github.com/graphql';
 
 let settings = {};
 let currentTab = 'github';
-// ponytail: in-memory cache cleared on refresh; no persistence needed for a popup
-const cache = {};
+let allPRs = [];
+let allTickets = [];
 
 // ── Bootstrap ──────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', async () => {
@@ -13,6 +13,13 @@ document.addEventListener('DOMContentLoaded', async () => {
   initTabs();
   document.getElementById('refresh-btn').addEventListener('click', refresh);
   document.getElementById('settings-btn').addEventListener('click', () => chrome.runtime.openOptionsPage());
+  document.getElementById('gh-search').addEventListener('input', applyPRFilter);
+  document.getElementById('author-filter').addEventListener('change', applyPRFilter);
+  document.getElementById('gh-assignee-filter').addEventListener('change', applyPRFilter);
+  document.getElementById('gh-status-filter').addEventListener('change', applyPRFilter);
+  document.getElementById('jira-search').addEventListener('input', applyTicketFilter);
+  document.getElementById('assignee-filter').addEventListener('change', applyTicketFilter);
+  document.getElementById('jira-status-filter').addEventListener('change', applyTicketFilter);
   loadTab(currentTab);
 });
 
@@ -31,11 +38,13 @@ function initTabs() {
   });
 }
 
-function refresh() {
-  delete cache[currentTab];
+async function refresh() {
   const btn = document.getElementById('refresh-btn');
   btn.classList.add('spinning');
-  loadTab(currentTab).finally(() => btn.classList.remove('spinning'));
+  const key = currentTab === 'github' ? 'gh_prs' : 'jira_tickets';
+  await sessionDel(key);
+  await loadTab(currentTab);
+  btn.classList.remove('spinning');
 }
 
 function loadTab(name) {
@@ -45,25 +54,33 @@ function loadTab(name) {
 // ── GitHub ─────────────────────────────────────────────────────────────────
 async function loadGitHub() {
   const pane = document.getElementById('github-pane');
+  const cached = await sessionGet('gh_prs');
+  if (cached) {
+    renderPRs(pane, cached.data);
+    stampUpdated(cached.time);
+    fetchGitHub(pane, true); // background refresh, no spinner
+  } else {
+    showLoading(pane);
+    await fetchGitHub(pane, false);
+  }
+}
 
-  if (cache.github) { renderPRs(pane, cache.github); return; }
-
-  showLoading(pane);
-
+async function fetchGitHub(pane, silent) {
   if (!settings.githubToken) {
-    return showError(pane, 'No GitHub token. <a href="#" class="open-opts">Open Settings →</a>');
+    if (!silent) showError(pane, 'No GitHub token. <a href="#" class="open-opts">Open Settings →</a>');
+    return;
   }
   if (!settings.repos?.length) {
-    return showEmpty(pane, 'No repos configured. Add them in Settings.');
+    if (!silent) showEmpty(pane, 'No repos configured. Add them in Settings.');
+    return;
   }
-
   try {
     const prs = await fetchAllPRs(settings.repos, settings.githubToken);
-    cache.github = prs;
-    stampUpdated();
+    await sessionSet('gh_prs', prs);
+    stampUpdated(Date.now());
     renderPRs(pane, prs);
   } catch (e) {
-    showError(pane, `GitHub error: ${e.message}`);
+    if (!silent) showError(pane, `GitHub error: ${e.message}`);
   }
 }
 
@@ -91,6 +108,7 @@ async function fetchRepoPRs(owner, name, token) {
             number title url isDraft headRefName
             reviewDecision createdAt updatedAt
             author { login }
+            assignees(first: 5) { nodes { login } }
             statusCheckRollup { state }
           }
         }
@@ -109,13 +127,38 @@ async function fetchRepoPRs(owner, name, token) {
     .map(pr => ({ ...pr, repo: `${owner}/${name}` }));
 }
 
+function prStatus(pr) {
+  if (pr.isDraft) return 'Draft';
+  return { APPROVED: 'Approved', CHANGES_REQUESTED: 'Changes Requested', REVIEW_REQUIRED: 'Review Required' }[pr.reviewDecision] ?? 'No Reviews';
+}
+
 function renderPRs(pane, prs) {
+  allPRs = prs;
   clearState(pane);
-  if (!prs.length) return showEmpty(pane, 'No open PRs found.');
-  pane.querySelector('.pr-list').innerHTML = prs.map(prCard).join('');
-  pane.querySelectorAll('.open-opts').forEach(a =>
-    a.addEventListener('click', e => { e.preventDefault(); chrome.runtime.openOptionsPage(); })
-  );
+  populateSelect(document.getElementById('author-filter'),
+    new Set(prs.map(p => p.author?.login).filter(Boolean)), 'All authors');
+  populateSelect(document.getElementById('gh-assignee-filter'),
+    new Set(prs.flatMap(p => p.assignees?.nodes?.map(a => a.login) ?? []).filter(Boolean)), 'All assignees');
+  populateSelect(document.getElementById('gh-status-filter'),
+    new Set(prs.map(prStatus)), 'All statuses');
+  document.getElementById('github-filter').style.display = prs.length ? '' : 'none';
+  applyPRFilter();
+}
+
+function applyPRFilter() {
+  const pane     = document.getElementById('github-pane');
+  const q        = document.getElementById('gh-search').value.toLowerCase();
+  const author   = document.getElementById('author-filter').value;
+  const assignee = document.getElementById('gh-assignee-filter').value;
+  const status   = document.getElementById('gh-status-filter').value;
+  const filtered = allPRs
+    .filter(p => !q        || p.title.toLowerCase().includes(q) || String(p.number).includes(q))
+    .filter(p => !author   || p.author?.login === author)
+    .filter(p => !assignee || p.assignees?.nodes?.some(a => a.login === assignee))
+    .filter(p => !status   || prStatus(p) === status);
+  if (!filtered.length) { showEmpty(pane, 'No PRs match the selected filters.'); return; }
+  clearState(pane);
+  pane.querySelector('.pr-list').innerHTML = filtered.map(prCard).join('');
 }
 
 function prCard(pr) {
@@ -172,25 +215,33 @@ function ciBadge(state) {
 // ── Jira ───────────────────────────────────────────────────────────────────
 async function loadJira() {
   const pane = document.getElementById('jira-pane');
+  const cached = await sessionGet('jira_tickets');
+  if (cached) {
+    renderTickets(pane, cached.data);
+    stampUpdated(cached.time);
+    fetchJira(pane, true); // background refresh
+  } else {
+    showLoading(pane);
+    await fetchJira(pane, false);
+  }
+}
 
-  if (cache.jira) { renderTickets(pane, cache.jira); return; }
-
-  showLoading(pane);
-
+async function fetchJira(pane, silent) {
   if (!settings.jiraToken || !settings.jiraUrl || !settings.jiraEmail) {
-    return showError(pane, 'Jira not configured. <a href="#" class="open-opts">Open Settings →</a>');
+    if (!silent) showError(pane, 'Jira not configured. <a href="#" class="open-opts">Open Settings →</a>');
+    return;
   }
   if (!settings.jiraProjects?.length) {
-    return showEmpty(pane, 'No Jira projects configured. Add project keys in Settings.');
+    if (!silent) showEmpty(pane, 'No Jira projects configured. Add project keys in Settings.');
+    return;
   }
-
   try {
     const tickets = await fetchJiraTickets(settings);
-    cache.jira = tickets;
-    stampUpdated();
+    await sessionSet('jira_tickets', tickets);
+    stampUpdated(Date.now());
     renderTickets(pane, tickets);
   } catch (e) {
-    showError(pane, `Jira error: ${e.message}`);
+    if (!silent) showError(pane, `Jira error: ${e.message}`);
   }
 }
 
@@ -210,12 +261,28 @@ async function fetchJiraTickets({ jiraUrl, jiraEmail, jiraToken, jiraProjects })
 }
 
 function renderTickets(pane, tickets) {
+  allTickets = tickets;
   clearState(pane);
-  if (!tickets.length) return showEmpty(pane, 'No active tickets found.');
-  pane.querySelector('.ticket-list').innerHTML = tickets.map(ticketCard).join('');
-  pane.querySelectorAll('.open-opts').forEach(a =>
-    a.addEventListener('click', e => { e.preventDefault(); chrome.runtime.openOptionsPage(); })
-  );
+  populateSelect(document.getElementById('assignee-filter'),
+    new Set(tickets.map(t => t.fields.assignee?.displayName).filter(Boolean)), 'All assignees');
+  populateSelect(document.getElementById('jira-status-filter'),
+    new Set(tickets.map(t => t.fields.status?.name).filter(Boolean)), 'All statuses');
+  document.getElementById('jira-filter').style.display = tickets.length ? '' : 'none';
+  applyTicketFilter();
+}
+
+function applyTicketFilter() {
+  const pane     = document.getElementById('jira-pane');
+  const q        = document.getElementById('jira-search').value.toLowerCase();
+  const assignee = document.getElementById('assignee-filter').value;
+  const status   = document.getElementById('jira-status-filter').value;
+  const filtered = allTickets
+    .filter(t => !q        || t.fields.summary.toLowerCase().includes(q) || t.key.toLowerCase().includes(q))
+    .filter(t => !assignee || t.fields.assignee?.displayName === assignee)
+    .filter(t => !status   || t.fields.status?.name === status);
+  if (!filtered.length) { showEmpty(pane, 'No tickets match the selected filters.'); return; }
+  clearState(pane);
+  pane.querySelector('.ticket-list').innerHTML = filtered.map(ticketCard).join('');
 }
 
 function ticketCard(issue) {
@@ -264,6 +331,14 @@ function jiraPriorityBadge(priority) {
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────
+function populateSelect(sel, valueSet, placeholder) {
+  const current = sel.value;
+  sel.innerHTML = `<option value="">${placeholder}</option>` +
+    [...valueSet].sort().map(v =>
+      `<option value="${esc(v)}"${v === current ? ' selected' : ''}>${esc(v)}</option>`
+    ).join('');
+}
+
 function extractJiraKey(text) {
   if (!text) return null;
   const m = text.match(/\b([A-Z][A-Z0-9]+-\d+)\b/);
@@ -284,9 +359,20 @@ function timeAgo(iso) {
   return `${Math.floor(hr / 24)}d ago`;
 }
 
-function stampUpdated() {
+function stampUpdated(time) {
   document.getElementById('last-updated').textContent =
-    `Updated ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+    `Updated ${new Date(time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+}
+
+// ── Session cache (persists while browser open, dies on close) ─────────────
+function sessionGet(key) {
+  return new Promise(resolve => chrome.storage.session.get(key, d => resolve(d[key] ?? null)));
+}
+function sessionSet(key, data) {
+  return new Promise(resolve => chrome.storage.session.set({ [key]: { data, time: Date.now() } }, resolve));
+}
+function sessionDel(key) {
+  return new Promise(resolve => chrome.storage.session.remove(key, resolve));
 }
 
 // ── UI state helpers ───────────────────────────────────────────────────────
@@ -294,6 +380,8 @@ function showLoading(pane) {
   pane.querySelector('.loading').style.display = '';
   pane.querySelector('.error').style.display   = 'none';
   pane.querySelector('.empty').style.display   = 'none';
+  const filter = pane.querySelector('.filter-bar');
+  if (filter) filter.style.display = 'none';
   const list = pane.querySelector('.pr-list, .ticket-list');
   if (list) list.innerHTML = '';
 }
