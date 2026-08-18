@@ -218,9 +218,9 @@ function prCard(pr) {
       </div>
       <div class="card-badges">
         ${pr.isDraft ? '<span class="badge badge-draft">Draft</span>' : '<span class="badge badge-open">Open</span>'}
-        ${reviewBadge(pr.reviewDecision)}
-        ${ciBadge(pr.statusCheckRollup?.state)}
         ${jiraBadge}
+        ${ciBadge(pr.statusCheckRollup?.state)}
+        ${reviewBadge(pr.reviewDecision)}
       </div>
       <div class="card-meta">
         <span>@${esc(pr.author?.login ?? 'unknown')}</span>
