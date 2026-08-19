@@ -7,6 +7,7 @@ let currentTab = 'github';
 let allPRs = [];
 let allTickets = [];
 let prCursors = {}; // { "owner/repo": endCursor } for repos with more pages
+let selectedRepo = '';
 
 const STALE_MS = 30 * 60 * 1000;
 
@@ -162,9 +163,30 @@ function prStatus(pr) {
   return { APPROVED: 'Approved', CHANGES_REQUESTED: 'Changes Requested', REVIEW_REQUIRED: 'Review Required' }[pr.reviewDecision] ?? 'No Reviews';
 }
 
+function renderRepoTabs(prs) {
+  const repos = [...new Set(prs.map(p => p.repo))].sort();
+  const bar = document.getElementById('repo-tabs');
+  if (repos.length <= 1) { bar.style.display = 'none'; return; }
+  bar.style.display = 'flex';
+  bar.innerHTML = ['', ...repos].map(repo => {
+    const label = repo === '' ? 'All' : repo.split('/')[1];
+    const count = repo === '' ? prs.length : prs.filter(p => p.repo === repo).length;
+    const active = selectedRepo === repo ? ' active' : '';
+    return `<button class="repo-pill${active}" data-repo="${esc(repo)}">${esc(label)} <span class="pill-count">${count}</span></button>`;
+  }).join('');
+  bar.querySelectorAll('.repo-pill').forEach(btn => {
+    btn.addEventListener('click', () => {
+      selectedRepo = btn.dataset.repo;
+      renderRepoTabs(allPRs);
+      applyPRFilter();
+    });
+  });
+}
+
 function renderPRs(pane, prs) {
   allPRs = prs;
   clearState(pane);
+  renderRepoTabs(prs);
   populateSelect(document.getElementById('author-filter'),
     new Set(prs.map(p => p.author?.login).filter(Boolean)), 'All authors');
   populateSelect(document.getElementById('gh-assignee-filter'),
@@ -189,10 +211,11 @@ function applyPRFilter() {
   const assignee = document.getElementById('gh-assignee-filter').value;
   const status   = document.getElementById('gh-status-filter').value;
   const filtered = allPRs
-    .filter(p => !q        || p.title.toLowerCase().includes(q) || String(p.number).includes(q))
-    .filter(p => !author   || p.author?.login === author)
-    .filter(p => !assignee || p.assignees?.nodes?.some(a => a.login === assignee))
-    .filter(p => !status   || prStatus(p) === status);
+    .filter(p => !selectedRepo || p.repo === selectedRepo)
+    .filter(p => !q            || p.title.toLowerCase().includes(q) || String(p.number).includes(q))
+    .filter(p => !author       || p.author?.login === author)
+    .filter(p => !assignee     || p.assignees?.nodes?.some(a => a.login === assignee))
+    .filter(p => !status       || prStatus(p) === status);
   if (!filtered.length) { showEmpty(pane, 'No PRs match the selected filters.'); return; }
   clearState(pane);
   pane.querySelector('.pr-list').innerHTML = filtered.map(prCard).join('');
@@ -419,6 +442,8 @@ function showLoading(pane) {
   pane.querySelector('.empty').style.display   = 'none';
   const filter = pane.querySelector('.filter-bar');
   if (filter) filter.style.display = 'none';
+  const repoBar = document.getElementById('repo-tabs');
+  if (repoBar) repoBar.style.display = 'none';
   const list = pane.querySelector('.pr-list, .ticket-list');
   if (list) list.innerHTML = '';
 }
