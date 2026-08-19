@@ -166,7 +166,8 @@ function prStatus(pr) {
 function renderRepoTabs(prs) {
   const repos = [...new Set(prs.map(p => p.repo))].sort();
   const bar = document.getElementById('repo-tabs');
-  if (repos.length <= 1) { bar.style.display = 'none'; return; }
+  if (!repos.length) { bar.style.display = 'none'; return; }
+  if (!selectedRepo) selectedRepo = repos[0];
   bar.style.display = 'flex';
   bar.innerHTML = ['', ...repos].map(repo => {
     const label = repo === '' ? 'All' : repo.split('/')[1];
